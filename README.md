@@ -18,6 +18,9 @@ ZONOS2 is our latest text-to-speech model trained on more than 6 million hours o
 
 During inference we use nemo TN normalized UTF-8 bytes and an ECAPA-TDNN embedding to generate DAC tokens with our MoE backbone. An inference overview can be seen below.
 
+<img width="1600" height="833" alt="zonos2" src="https://github.com/user-attachments/assets/a63c9327-51c7-446c-a99b-ca0fbe5da93a" />
+
+
 ![ZONOS2 inference overview](https://huggingface.co/Zyphra/ZONOS2/resolve/main/assets/zonos2_arlooop_animated.gif)
 
 > [!WARNING]
