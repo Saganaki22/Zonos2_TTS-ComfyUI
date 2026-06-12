@@ -1,6 +1,6 @@
 # ZONOS2 TTS ComfyUI
 
-[![Version](https://img.shields.io/badge/version-0.1.1-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
+[![Version](https://img.shields.io/badge/version-0.1.2-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-2d7dd2)](https://github.com/comfyanonymous/ComfyUI)
 [![Upstream](https://img.shields.io/badge/Upstream-Zyphra%2FZONOS2-111111)](https://github.com/Zyphra/ZONOS2)
 [![Official Model](https://img.shields.io/badge/Hugging_Face-Zyphra%2FZONOS2-ffd21e)](https://huggingface.co/Zyphra/ZONOS2)
@@ -9,11 +9,15 @@
 
 [English README](README.md)
 
+<img width="1444" height="1203" alt="ZONOS2 ComfyUI 工作流" src="https://github.com/user-attachments/assets/a776ed13-a106-476f-b5fa-e55402365bb8" />
+
 这是面向 [Zyphra/ZONOS2](https://github.com/Zyphra/ZONOS2) 的原生 ComfyUI 节点，支持文本转语音、仅音频的声音克隆、SDPA 与 FlashAttention 推理、原生进度显示，以及 ComfyUI/AIMDO 显存管理。
 
 ZONOS2 是 Zyphra 最新的文本转语音模型，使用超过 600 万小时的多语言、多样化语音进行训练。它依靠 MoE 架构以较低延迟提供可与顶级 TTS 服务相当甚至更高的表现力和质量，并擅长高保真、自然的声音克隆。
 
 推理时，模型使用 NeMo TN 规范化的 UTF-8 字节和 ECAPA-TDNN 说话人嵌入，通过 MoE 主干生成 DAC token。推理流程如下。
+
+<img width="1600" height="833" alt="ZONOS2" src="https://github.com/user-attachments/assets/a63c9327-51c7-446c-a99b-ca0fbe5da93a" />
 
 ![ZONOS2 推理流程](https://huggingface.co/Zyphra/ZONOS2/resolve/main/assets/zonos2_arlooop_animated.gif)
 
@@ -62,7 +66,13 @@ git clone https://github.com/Saganaki22/Zonos2_TTS-ComfyUI.git
 ../venv/bin/python Zonos2_TTS-ComfyUI/install.py
 ```
 
-安装或更新后请重启 ComfyUI。`install.py` 只安装缺失的轻量依赖，不会替换 ComfyUI 已有的 `torch`、`torchaudio` 或 `transformers`。
+对于由 uv 管理的 ComfyUI 环境：
+
+```bash
+uv run python Zonos2_TTS-ComfyUI/install.py
+```
+
+系统中存在 uv 时，`install.py` 会自动运行 `uv pip install --python <当前 ComfyUI Python>`；否则回退到 `python -m pip`。安装或更新后请重启 ComfyUI。该脚本只安装缺失的轻量依赖，不会替换 ComfyUI 已有的 `torch`、`torchaudio` 或 `transformers`。
 
 </details>
 
@@ -260,8 +270,7 @@ Apache-2.0 模型许可证与本项目的可接受使用政策彼此独立。无
 
 </details>
 
-<details>
-<summary><strong>引用</strong></summary>
+## 引用
 
 如果本模型对您的学术研究有帮助，请引用：
 
@@ -272,8 +281,6 @@ Apache-2.0 模型许可证与本项目的可接受使用政策彼此独立。无
   year      = {2026},
 }
 ```
-
-</details>
 
 ## 致谢
 

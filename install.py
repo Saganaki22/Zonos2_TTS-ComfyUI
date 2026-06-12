@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -48,6 +50,20 @@ def _print_transformers_status() -> None:
     )
 
 
+def _install_command(packages: list[str]) -> list[str]:
+    uv = shutil.which("uv")
+    if uv:
+        return [
+            uv,
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            *packages,
+        ]
+    return [sys.executable, "-m", "pip", "install", *packages]
+
+
 def main() -> int:
     missing_critical = [
         name for name in CRITICAL_IMPORTS if importlib.util.find_spec(name) is None
@@ -73,7 +89,10 @@ def main() -> int:
 
     print("Installing missing lightweight dependencies:", ", ".join(missing))
     print("Torch, torchaudio, and transformers are not modified.")
-    return subprocess.call([sys.executable, "-m", "pip", "install", *missing])
+    command = _install_command(missing)
+    installer = "uv" if Path(command[0]).stem.lower() == "uv" else "pip"
+    print(f"Using {installer} with the active ComfyUI Python: {sys.executable}")
+    return subprocess.call(command)
 
 
 if __name__ == "__main__":

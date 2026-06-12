@@ -1,0 +1,20 @@
+# INFORMATION ONLY - do not use this file as the authoritative installer.
+#
+# Dependency metadata is maintained in pyproject.toml, and install.py installs
+# only missing lightweight packages using uv or pip with the active ComfyUI
+# Python environment. Torch, torchaudio, and Transformers are intentionally
+# left under the control of the user's ComfyUI installation.
+#
+# Core runtime supplied by ComfyUI:
+# torch
+# torchaudio
+# transformers>=5.0.0,<=5.12.0
+#
+# Lightweight dependencies handled by pyproject.toml and install.py:
+# accelerate
+# huggingface-hub
+# safetensors
+# tqdm
+#
+# Optional CUDA attention backend:
+# flash-attn

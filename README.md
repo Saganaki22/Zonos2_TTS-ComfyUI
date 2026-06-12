@@ -1,6 +1,6 @@
 # ZONOS2 TTS ComfyUI
 
-[![Version](https://img.shields.io/badge/version-0.1.1-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
+[![Version](https://img.shields.io/badge/version-0.1.2-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-2d7dd2)](https://github.com/comfyanonymous/ComfyUI)
 [![Upstream](https://img.shields.io/badge/Upstream-Zyphra%2FZONOS2-111111)](https://github.com/Zyphra/ZONOS2)
 [![Official Model](https://img.shields.io/badge/Hugging_Face-Zyphra%2FZONOS2-ffd21e)](https://huggingface.co/Zyphra/ZONOS2)
@@ -68,7 +68,13 @@ git clone https://github.com/Saganaki22/Zonos2_TTS-ComfyUI.git
 ../venv/bin/python Zonos2_TTS-ComfyUI/install.py
 ```
 
-Restart ComfyUI after installing or updating. `install.py` installs only missing lightweight dependencies and does not replace ComfyUI's `torch`, `torchaudio`, or `transformers`.
+For a uv-managed ComfyUI environment:
+
+```bash
+uv run python Zonos2_TTS-ComfyUI/install.py
+```
+
+When uv is available, `install.py` automatically runs `uv pip install --python <active ComfyUI Python>`. Otherwise, it falls back to `python -m pip`. Restart ComfyUI after installing or updating. The helper installs only missing lightweight dependencies and does not replace ComfyUI's `torch`, `torchaudio`, or `transformers`.
 
 </details>
 
@@ -266,8 +272,7 @@ The Apache-2.0 model license and this project's acceptable-use policy are separa
 
 </details>
 
-<details>
-<summary><strong>Citation</strong></summary>
+## Citation
 
 If you find this model useful in an academic context, please cite:
 
@@ -278,8 +283,6 @@ If you find this model useful in an academic context, please cite:
   year      = {2026},
 }
 ```
-
-</details>
 
 ## Credits
 

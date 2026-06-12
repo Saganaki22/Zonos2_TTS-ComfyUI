@@ -36,7 +36,7 @@
       ],
       "properties": {
         "aux_id": "Saganaki22/Zonos2_TTS-ComfyUI",
-        "ver": "0.1.1",
+        "ver": "0.1.2",
         "Node name for S&R": "Zonos2VoiceGeneration",
         "cnr_id": "Zonos2_TTS-ComfyUI",
         "ue_properties": {
@@ -140,7 +140,7 @@
       ],
       "properties": {
         "aux_id": "Saganaki22/Zonos2_TTS-ComfyUI",
-        "ver": "0.1.1",
+        "ver": "0.1.2",
         "Node name for S&R": "Zonos2VoiceClone",
         "cnr_id": "Zonos2_TTS-ComfyUI",
         "ue_properties": {
@@ -238,7 +238,7 @@
       ],
       "properties": {
         "aux_id": "Saganaki22/Zonos2_TTS-ComfyUI",
-        "ver": "0.1.1",
+        "ver": "0.1.2",
         "Node name for S&R": "Zonos2ModelLoader",
         "cnr_id": "Zonos2_TTS-ComfyUI",
         "ue_properties": {
