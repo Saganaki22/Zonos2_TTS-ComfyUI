@@ -9,6 +9,9 @@
 
 [简体中文](README_zh.md)
 
+<img width="1444" height="1203" alt="Screenshot 2026-06-12 214924" src="https://github.com/user-attachments/assets/a776ed13-a106-476f-b5fa-e55402365bb8" />
+
+
 Native ComfyUI nodes for [Zyphra/ZONOS2](https://github.com/Zyphra/ZONOS2), with text-to-speech, audio-only voice cloning, SDPA and FlashAttention inference, native progress reporting, and ComfyUI/AIMDO memory management.
 
 ZONOS2 is our latest text-to-speech model trained on more than 6 million hours of varied multilingual speech, delivering expressiveness and quality on par with—or even surpassing—top TTS providers at low latency with MoE. ZONOS2 excels at high-fidelity and naturalistic voice cloning.
