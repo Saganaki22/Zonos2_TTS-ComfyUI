@@ -1,0 +1,414 @@
+{
+  "id": "4213d671-daa8-4dca-855c-c577cc7636bf",
+  "revision": 0,
+  "last_node_id": 7,
+  "last_link_id": 5,
+  "nodes": [
+    {
+      "id": 2,
+      "type": "Zonos2VoiceGeneration",
+      "pos": [
+        570.9065439360795,
+        41.39376704368272
+      ],
+      "size": [
+        430,
+        690
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "zonos2_model",
+          "type": "ZONOS2_MODEL",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "Saganaki22/Zonos2_TTS-ComfyUI",
+        "ver": "0.1.1",
+        "Node name for S&R": "Zonos2VoiceGeneration",
+        "cnr_id": "Zonos2_TTS-ComfyUI",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Hello! This is ZONOS2 running natively inside ComfyUI.",
+        1024,
+        1.15,
+        106,
+        0,
+        0.18,
+        50,
+        1.2,
+        8,
+        "default",
+        "default",
+        "default",
+        "default",
+        "default",
+        "default",
+        "3: 0.25-0.5",
+        21344792835795,
+        "randomize"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "SaveAudioMP3",
+      "pos": [
+        1080.906543936079,
+        171.39376704368271
+      ],
+      "size": [
+        300,
+        208.078125
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 3
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "SaveAudioMP3",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "audio/zonos2_generation",
+        "V0"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "Zonos2VoiceClone",
+      "pos": [
+        576.4814589874567,
+        823.4502559250318
+      ],
+      "size": [
+        430,
+        780
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "zonos2_model",
+          "type": "ZONOS2_MODEL",
+          "link": 2
+        },
+        {
+          "name": "reference_audio",
+          "type": "AUDIO",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "Saganaki22/Zonos2_TTS-ComfyUI",
+        "ver": "0.1.1",
+        "Node name for S&R": "Zonos2VoiceClone",
+        "cnr_id": "Zonos2_TTS-ComfyUI",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "This sentence will use the voice from the connected reference audio.",
+        false,
+        true,
+        1024,
+        1.15,
+        106,
+        0,
+        0.18,
+        50,
+        1.2,
+        8,
+        "default",
+        "default",
+        "default",
+        "default",
+        "default",
+        "default",
+        "3: 0.25-0.5",
+        202984824070867,
+        "randomize"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "SaveAudioMP3",
+      "pos": [
+        1062.787610649042,
+        995.9941210373375
+      ],
+      "size": [
+        300,
+        208.078125
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 5
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "SaveAudioMP3",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "audio/zonos2_clone",
+        "V0"
+      ]
+    },
+    {
+      "id": 1,
+      "type": "Zonos2ModelLoader",
+      "pos": [
+        129.26883995146864,
+        33.235790359090394
+      ],
+      "size": [
+        360,
+        196.09375
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "zonos2_model",
+          "type": "ZONOS2_MODEL",
+          "links": [
+            1,
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "Saganaki22/Zonos2_TTS-ComfyUI",
+        "ver": "0.1.1",
+        "Node name for S&R": "Zonos2ModelLoader",
+        "cnr_id": "Zonos2_TTS-ComfyUI",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "ZONOS2 BF16 - drbaph/ZONOS2-BF16",
+        "auto",
+        "auto",
+        false
+      ]
+    },
+    {
+      "id": 4,
+      "type": "LoadAudio",
+      "pos": [
+        145.9941975990148,
+        846.1404163582835
+      ],
+      "size": [
+        360,
+        152.140625
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "LoadAudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "stewie.wav",
+        null,
+        null
+      ]
+    },
+    {
+      "id": 7,
+      "type": "MarkdownNote",
+      "pos": [
+        -567.2661833334903,
+        8.341538886863717
+      ],
+      "size": [
+        650.890625,
+        1606.453125
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "‎",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "## ZONOS2_TTS-ComfyUI Model Requirements\n\n**VRAM:** ZONOS2 BF16 uses roughly **14.7 GB VRAM** with the main model and DAC loaded before generation cache growth. Leave extra VRAM for KV cache, speaker encoder, ComfyUI, and other loaded models.\n\nZONOS2 has **ComfyUI / AIMDO model-management integration** with unload support, real tensor registration, and cleanup/reload when model, dtype, or attention settings change.\n\n**zonos2** main TTS model\n\n- 🤗 [drbaph/ZONOS2-BF16 — zonos2-bf16.safetensors](https://huggingface.co/drbaph/ZONOS2-BF16/resolve/main/zonos2-bf16.safetensors?download=true)\n\n**Required model assets**\n\n- `zonos2-bf16.safetensors`\n- `dac_44khz/`\n- `speaker_encoder/`\n\nAll assets are downloaded from:\n\n- 🤗 [drbaph/ZONOS2-BF16](https://huggingface.co/drbaph/ZONOS2-BF16)\n\n## Model Storage Location\n\n~~~text\nComfyUI/models/zonos2/\n├── zonos2-bf16.safetensors\n├── dac_44khz/\n│   ├── .gitattributes\n│   ├── config.json\n│   ├── model.safetensors\n│   ├── preprocessor_config.json\n│   └── README.md\n└── speaker_encoder/\n    ├── config.json\n    ├── configuration_ecapa_tdnn.py\n    ├── feature_extraction_ecapa_tdnn.py\n    ├── model.safetensors\n    ├── modeling_ecapa_tdnn.py\n    ├── preprocessor_config.json\n    ├── tokenizer_config.json\n    └── tokenizer_ecapa_tdnn.py\n~~~\n\nIf `download_if_missing` is enabled, missing models / assets are downloaded automatically.\n\nThe loader uses the bundled architecture config from:\n\n~~~text\nComfyUI/custom_nodes/Zonos2_TTS-ComfyUI/assets/params.json\n~~~\n\n## Notes\n\n- Use `dtype: auto`, `bf16`, or `fp16`.\n- Use `attention: auto`, `SDPA`, or `flash_attention`.\n- `auto` selects FlashAttention when available, otherwise SDPA.\n- Voice cloning uses audio-only reference input and does not require a transcript.\n- Recommended voice reference: **5–30 seconds** of clean, single-speaker speech.\n- Maximum accepted reference length: **60 seconds**.\n\n## Links\n\n- [Issues](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI/issues)\n- [Zonos2_TTS-ComfyUI](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)\n- [Native BF16 Model Repository](https://huggingface.co/drbaph/ZONOS2-BF16)\n- [Official ZONOS2 Repository](https://github.com/Zyphra/ZONOS2)"
+      ],
+      "color": "#222",
+      "bgcolor": "#000"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "ZONOS2_MODEL"
+    ],
+    [
+      2,
+      1,
+      0,
+      5,
+      0,
+      "ZONOS2_MODEL"
+    ],
+    [
+      3,
+      2,
+      0,
+      3,
+      0,
+      "AUDIO"
+    ],
+    [
+      4,
+      4,
+      0,
+      5,
+      1,
+      "AUDIO"
+    ],
+    [
+      5,
+      5,
+      0,
+      6,
+      0,
+      "AUDIO"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "Voice Clone",
+      "bounding": [
+        113.6940014617679,
+        753.4502559250318,
+        1282.7874575256888,
+        860
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "Voice Generation",
+      "bounding": [
+        560.9065439360795,
+        -28.606232956317278,
+        830,
+        770
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.4500000000000042,
+      "offset": [
+        2440.3046528487157,
+        985.6071275231844
+      ]
+    },
+    "ue_links": [],
+    "links_added_by_ue": [],
+    "frontendVersion": "1.45.15",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

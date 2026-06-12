@@ -1,0 +1,28 @@
+[project]
+name = "Zonos2_TTS-ComfyUI"
+description = "Native ComfyUI nodes for Zyphra ZONOS2 text-to-speech and voice cloning with AIMDO memory tracking"
+version = "0.1.1"
+license = {file = "LICENSE"}
+dependencies = [
+    "accelerate",
+    "huggingface-hub",
+    "safetensors",
+    "tqdm",
+]
+
+[project.urls]
+Repository = "https://github.com/Saganaki22/Zonos2_TTS-ComfyUI"
+ZONOS2 = "https://github.com/Zyphra/ZONOS2"
+Model = "https://huggingface.co/drbaph/ZONOS2-BF16"
+
+[tool.comfy]
+PublisherId = "saganaki22"
+DisplayName = "ZONOS2 TTS"
+Icon = "https://avatars.githubusercontent.com/u/84208527"
+PreInstall = "install.py"
+
+[tool.zonos2-tts]
+model-folder = "ComfyUI/models/zonos2"
+model-vram = "about 15.5 GB for BF16 weights plus KV cache and DAC"
+transformers = ">=5.0.0,<=5.12.0"
+recommended-transformers = "5.3.0"
