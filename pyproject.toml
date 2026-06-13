@@ -1,7 +1,7 @@
 [project]
 name = "Zonos2_TTS-ComfyUI"
 description = "Native ComfyUI nodes for Zyphra ZONOS2 text-to-speech and voice cloning with AIMDO memory tracking"
-version = "0.1.3"
+version = "0.1.4"
 license = {file = "LICENSE"}
 dependencies = [
     "accelerate",

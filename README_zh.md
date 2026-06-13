@@ -1,8 +1,9 @@
 # ZONOS2 TTS ComfyUI
 
-[![Version](https://img.shields.io/badge/version-0.1.3-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
+[![Version](https://img.shields.io/badge/version-0.1.4-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-2d7dd2)](https://github.com/comfyanonymous/ComfyUI)
 [![Upstream](https://img.shields.io/badge/Upstream-Zyphra%2FZONOS2-111111)](https://github.com/Zyphra/ZONOS2)
+[![Zyphra Blog](https://img.shields.io/badge/Zyphra-ZONOS2_Blog-7c3aed)](https://www.zyphra.com/our-work/zonos2)
 [![Official Model](https://img.shields.io/badge/Hugging_Face-Zyphra%2FZONOS2-ffd21e)](https://huggingface.co/Zyphra/ZONOS2)
 [![Native BF16 Model](https://img.shields.io/badge/Hugging_Face-drbaph%2FZONOS2--BF16-ffd21e)](https://huggingface.co/drbaph/ZONOS2-BF16)
 [![Model License](https://img.shields.io/badge/Model_License-Apache--2.0-green)](https://huggingface.co/Zyphra/ZONOS2)
@@ -20,6 +21,14 @@ ZONOS2 是 Zyphra 最新的文本转语音模型，使用超过 600 万小时的
 <img width="1600" height="833" alt="ZONOS2" src="https://github.com/user-attachments/assets/a63c9327-51c7-446c-a99b-ca0fbe5da93a" />
 
 ![ZONOS2 推理流程](https://huggingface.co/Zyphra/ZONOS2/resolve/main/assets/zonos2_arlooop_animated.gif)
+
+**语言支持**
+
+| 等级 | 语言 |
+| --- | --- |
+| Tier 1 | 英语、普通话、日语 |
+| Tier 2 | 韩语、俄语、意大利语、葡萄牙语、法语、西班牙语、越南语、德语、希伯来语、荷兰语 |
+| Tier 3 | 瑞典语、印地语、泰米尔语、泰卢固语、泰语、挪威语、孟加拉语、他加禄语、阿拉伯语、丹麦语、印度尼西亚语、波兰语、乌克兰语、罗马尼亚语、芬兰语、匈牙利语、立陶宛语、爱沙尼亚语、斯洛伐克语、克罗地亚语、拉脱维亚语 |
 
 > [!WARNING]
 > 只能克隆您拥有或已获得明确授权的声音。严禁将本项目用于恶意冒充、欺诈、误导、骚扰、滥用、规避同意或任何蓄意造成伤害的行为。
@@ -205,16 +214,25 @@ ComfyUI/models/zonos2/
 <details>
 <summary><strong>显存管理与进度</strong></summary>
 
-ZONOS2 主模型、DAC 解码器和按需加载的说话人编码器都会作为真实 PyTorch 模块注册到 ComfyUI/AIMDO。
+ZONOS2 主模型、DAC 解码器和按需加载的说话人编码器都会作为真实 PyTorch 模块注册到 ComfyUI 模型管理。
 
-- ComfyUI 可以将模型包卸载到 CPU，并在下次运行时恢复。
-- AIMDO 显示条反映真实 GPU 张量驻留状态。
+- BF16 主模型的估算大小约为 14.324 GiB。加载器额外保留 3 GiB 运行余量，因此自动选择 AIMDO 的总显存分界线约为 17.324 GiB。
+- 启用 AIMDO DynamicVRAM 后，低于该分界线的 GPU（包括常见的 8 GiB、12 GiB 和 16 GiB 显卡）会使用 ComfyUI 真实的 `CoreModelPatcher` 与 AIMDO VBAR 路径。
+- 在动态路径中，主模型的大型 MoE 专家权重保持文件映射，并仅按需将实际选中的专家分页到显存。VBAR 分配、缺页载入、驻留和驱逐都是真实的 AIMDO 操作，并非可视化模拟。
+- 当 GPU 总显存足以容纳估算模型并保留 3 GiB 余量时，会使用静态 GPU 路径。这样不会保留 CPU 模型后备，并可直接执行 CUDA 专家计算。
+- 自动选择依据是 GPU 的总显存容量，而不是当时的空闲显存。因此，即使 24 GiB 或 32 GiB 显卡已有其他模型占用部分显存，仍会选择静态路径；ComfyUI 可能会卸载其他模型以腾出空间。
+- 在动态路径中，共享注意力、路由、嵌入和输出权重保持常驻，以避免逐 token 的额外分页开销。
+- 每个专家的 `w13` 和 `w2` 投影共享一个可分页分配，因此只有实际路由到的专家需要进入显存，并且 AIMDO 每个专家只需执行一次驻留检查。
+- 较小的 DAC 和说话人编码器使用 ComfyUI 标准静态补丁器，因此 Memory Visualization 会根据真实已加载大小将它们显示为橙色静态显存行。
+- 未启用 AIMDO 的系统无论 GPU 容量如何，都会使用 ComfyUI 标准静态模型补丁器，并将权重直接加载到所选设备。
+- 主模型的 AIMDO 显示条反映真实专家页面驻留状态，并随页面载入或驱逐实时更新。
+- 动态分页必须保留一份文件映射的 CPU 权重源，以便恢复被驱逐的权重。这些干净映射页面可由操作系统回收；节点不会再创建第二份完整专家副本。
 - 使用完全相同的加载设置时会恢复现有模型包。
 - 更改模型、数据类型或注意力后端时，旧模型会取消注册，张量会移至 `meta`，随后清理引用、执行垃圾回收并清空加速器缓存。
 - 加载和生成均使用原生 ComfyUI 进度条及 CLI `tqdm`。
 - 单 token MoE 解码只调度实际选中的专家权重，不再逐个扫描全部专家，可在不改变生成 token 的前提下显著降低自回归生成开销。
 
-实测主 BF16 模型和 DAC 加载后的 CUDA 分配约为 14.7 GiB。还需为 KV 缓存、说话人编码器、ComfyUI 和其他节点预留额外显存。
+未启用 DynamicVRAM 时，实测主 BF16 模型和 DAC 加载后的 CUDA 分配约为 14.7 GiB。启用 AIMDO VBAR 后，专家权重的驻留显存会根据可用显存动态调整。加载器的 3 GiB 余量仅用于选择加载路径，并不保证所有工作流都一定能够运行；仍需为 KV 缓存、说话人编码器、DAC、ComfyUI 和其他节点预留额外显存。
 
 </details>
 
@@ -231,7 +249,7 @@ ZONOS2 主模型、DAC 解码器和按需加载的说话人编码器都会作为
 
 **CUDA 显存不足**
 
-卸载其他大型 ComfyUI 模型、降低 `max_new_tokens`、使用 ComfyUI 卸载功能，或在分配失败后重启 ComfyUI。ZONOS2 BF16 与 DAC 在生成缓存增长前约占 14.7 GiB。
+卸载其他大型 ComfyUI 模型、降低 `max_new_tokens`、使用 ComfyUI 卸载功能，或在分配失败后重启 ComfyUI。ZONOS2 BF16 与 DAC 在生成缓存增长前约占 14.7 GiB。自动 VBAR 选择依据总显存：启用 DynamicVRAM 时，低于约 17.324 GiB 的 GPU 使用 AIMDO VBAR，更大容量的 GPU 则选择静态路径。
 
 **声音克隆相似度较低**
 

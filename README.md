@@ -1,10 +1,11 @@
 # ZONOS2 TTS ComfyUI
 
-ComfyUI custom nodes nodes for [Zyphra/ZONOS2](https://github.com/Zyphra/ZONOS2), with text-to-speech, audio-only voice cloning, SDPA and FlashAttention inference, native progress reporting, and ComfyUI/AIMDO memory management.
+ComfyUI custom nodes for [Zyphra/ZONOS2](https://github.com/Zyphra/ZONOS2), with text-to-speech, audio-only voice cloning, SDPA and FlashAttention inference, native progress reporting, and ComfyUI/AIMDO memory management.
 
-[![Version](https://img.shields.io/badge/version-0.1.3-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
+[![Version](https://img.shields.io/badge/version-0.1.4-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-2d7dd2)](https://github.com/comfyanonymous/ComfyUI)
 [![Upstream](https://img.shields.io/badge/Upstream-Zyphra%2FZONOS2-111111)](https://github.com/Zyphra/ZONOS2)
+[![Zyphra Blog](https://img.shields.io/badge/Zyphra-ZONOS2_Blog-7c3aed)](https://www.zyphra.com/our-work/zonos2)
 [![Official Model](https://img.shields.io/badge/Hugging_Face-Zyphra%2FZONOS2-ffd21e)](https://huggingface.co/Zyphra/ZONOS2)
 [![Native BF16 Model](https://img.shields.io/badge/Hugging_Face-drbaph%2FZONOS2--BF16-ffd21e)](https://huggingface.co/drbaph/ZONOS2-BF16)
 [![Model License](https://img.shields.io/badge/Model_License-Apache--2.0-green)](https://huggingface.co/Zyphra/ZONOS2)
@@ -21,6 +22,14 @@ During inference we use nemo TN normalized UTF-8 bytes and an ECAPA-TDNN embeddi
 
 
 ![ZONOS2 inference overview](https://huggingface.co/Zyphra/ZONOS2/resolve/main/assets/zonos2_arlooop_animated.gif)
+
+**Language Support**
+
+| Tier | Languages |
+| --- | --- |
+| Tier 1 | English, Mandarin Chinese, Japanese |
+| Tier 2 | Korean, Russian, Italian, Portuguese, French, Spanish, Vietnamese, German, Hebrew, Dutch |
+| Tier 3 | Swedish, Hindi, Tamil, Telugu, Thai, Norwegian, Bengali, Tagalog, Arabic, Danish, Indonesian, Polish, Ukrainian, Romanian, Finnish, Hungarian, Lithuanian, Estonian, Slovak, Croatian, Latvian |
 
 > [!WARNING]
 > Only clone voices you own or have explicit permission to use. Malicious impersonation, fraud, deception, harassment, abuse, evasion of consent, or any use intended to cause harm is strictly forbidden by this project's acceptable-use policy.
@@ -206,16 +215,25 @@ Transformers 4.x is not supported by this nodepack because common current ComfyU
 <details>
 <summary><strong>Memory management and progress</strong></summary>
 
-The ZONOS2 model, DAC decoder, and lazy speaker encoder are registered as real PyTorch modules with ComfyUI/AIMDO.
+The ZONOS2 model, DAC decoder, and lazy speaker encoder are registered as real PyTorch modules with ComfyUI model management.
 
-- ComfyUI can offload the bundle to CPU and restore it for the next run.
-- AIMDO bars reflect actual GPU tensor residency.
+- The BF16 main model is estimated at approximately 14.324 GiB. The loader adds a 3 GiB runtime reserve, producing an automatic AIMDO cutoff of approximately 17.324 GiB total VRAM.
+- When AIMDO DynamicVRAM is enabled, GPUs below that cutoff, including typical 8 GiB, 12 GiB, and 16 GiB cards, use ComfyUI's real `CoreModelPatcher` and AIMDO VBAR path.
+- On that dynamic path, the main model keeps its large MoE expert weights file-backed and pages only the selected experts into VRAM on demand. VBAR allocations, page faults, residency, and eviction are real AIMDO operations rather than visualization emulation.
+- GPUs with enough total VRAM for the estimated model plus the 3 GiB reserve use the static GPU path. This avoids retained CPU model backing and gives the direct CUDA expert path.
+- The automatic choice uses the GPU's total VRAM capacity, not its currently free VRAM. A 24 GiB or 32 GiB GPU therefore selects the static path even when other loaded models are using part of its VRAM; ComfyUI may unload those models to make room.
+- Shared attention, routing, embedding, and output weights remain resident on the dynamic path to avoid per-token paging overhead.
+- Each expert's `w13` and `w2` projections share one pageable allocation, so only the routed expert needs to become resident and AIMDO performs one residency check per expert.
+- The smaller DAC and speaker encoder use ComfyUI's standard static patcher. Memory Visualization therefore shows them as orange static VRAM rows using their real loaded sizes.
+- Systems without AIMDO always use ComfyUI's standard static model patcher and load weights directly to the selected device, regardless of GPU capacity.
+- The main model's AIMDO bar reflects actual expert-page residency and updates as pages are faulted or evicted.
+- Dynamic paging necessarily keeps one file-backed CPU source for weights that may be evicted. These clean mapped pages are reclaimable by the operating system; the node does not create a second full expert copy.
 - Reusing identical loader settings resumes the existing bundle.
 - Changing model, dtype, or attention unregisters the old bundle, moves its tensors to `meta`, clears references, runs garbage collection, and empties accelerator caches before loading the replacement.
 - Loading and generation use native ComfyUI progress bars plus CLI `tqdm`.
 - Single-token MoE decoding dispatches only the selected expert weights instead of scanning every expert, substantially reducing autoregressive generation overhead without changing generated tokens.
 
-Measured BF16 CUDA allocation with the main model and DAC loaded is approximately 14.7 GiB. Leave additional VRAM available for the KV cache, speaker encoder, ComfyUI, and other nodes.
+Without DynamicVRAM, measured BF16 CUDA allocation with the main model and DAC loaded is approximately 14.7 GiB. With AIMDO VBAR, resident expert-weight memory adapts to available VRAM. The 3 GiB loader reserve is a path-selection allowance, not a guarantee that every workflow will fit; always leave additional VRAM for the KV cache, speaker encoder, DAC, ComfyUI, and other nodes.
 
 </details>
 
@@ -232,7 +250,7 @@ Use `attention: auto` or `SDPA`. Auto falls back to SDPA when FlashAttention is 
 
 **CUDA out of memory**
 
-Unload other large ComfyUI models, reduce `max_new_tokens`, use ComfyUI offloading, or restart ComfyUI after a failed allocation. ZONOS2 BF16 plus DAC uses roughly 14.7 GiB before generation cache growth.
+Unload other large ComfyUI models, reduce `max_new_tokens`, use ComfyUI offloading, or restart ComfyUI after a failed allocation. ZONOS2 BF16 plus DAC uses roughly 14.7 GiB before generation cache growth. Automatic VBAR selection is based on total VRAM: GPUs below approximately 17.324 GiB use AIMDO VBAR when DynamicVRAM is enabled, while larger GPUs select the static path.
 
 **Voice cloning sounds weak or inaccurate**
 

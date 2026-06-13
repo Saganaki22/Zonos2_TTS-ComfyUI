@@ -5,8 +5,6 @@ from __future__ import annotations
 import gc
 import importlib.util
 import logging
-import math
-import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -20,6 +18,7 @@ from .native import (
     build_native_model,
     load_native_weights,
     read_config,
+    set_runtime_dtype,
     validate_checkpoint_layout,
 )
 
@@ -191,6 +190,43 @@ def resolve_device() -> torch.device:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def dynamic_vram_active(device: torch.device) -> bool:
+    if torch.device(device).type == "cpu":
+        return False
+    try:
+        import comfy.memory_management
+
+        return bool(comfy.memory_management.aimdo_enabled)
+    except Exception:
+        return False
+
+
+def estimate_runtime_model_bytes(
+    model: torch.nn.Module,
+    dtype: torch.dtype,
+) -> int:
+    total = 0
+    for value in list(model.parameters()) + list(model.buffers()):
+        item_size = dtype.itemsize if value.is_floating_point() else value.element_size()
+        total += value.numel() * item_size
+    return total
+
+
+def should_use_dynamic_vram(
+    model: torch.nn.Module,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> bool:
+    if not dynamic_vram_active(device):
+        return False
+    if torch.device(device).type != "cuda":
+        return True
+    total_vram = torch.cuda.get_device_properties(device).total_memory
+    model_bytes = estimate_runtime_model_bytes(model, dtype)
+    reserve = 3 * 1024**3
+    return model_bytes + reserve > total_vram
+
+
 def _flash_attention_available(
     device: torch.device,
     dtype: torch.dtype,
@@ -224,230 +260,9 @@ def resolve_attention(
     raise ValueError(f"Unsupported attention mode: {attention}")
 
 
-def _module_unique_tensors(module: torch.nn.Module) -> list[torch.Tensor]:
-    seen: set[int] = set()
-    tensors: list[torch.Tensor] = []
-    values = list(module.parameters(recurse=True))
-    values.extend(module.buffers(recurse=True))
-    for tensor in values:
-        identity = id(tensor)
-        if identity in seen:
-            continue
-        seen.add(identity)
-        tensors.append(tensor)
-    return tensors
-
-
-def _same_device(a: torch.device, b: torch.device) -> bool:
-    left = torch.device(a)
-    right = torch.device(b)
-    return left.type == right.type and (left.index or 0) == (right.index or 0)
-
-
-class Zonos2VBar:
-    page_size = 32 * 1024 * 1024
-
-    def __init__(self, model: torch.nn.Module, device: torch.device):
-        self.model = model
-        self.device = torch.device(device)
-        self.tensors: list[torch.Tensor] = []
-        self.total_size = 0
-        self.total_pages = 0
-        self.watermark = 0
-        self._refresh_tensors()
-
-    @property
-    def offset(self) -> int:
-        return self.total_size
-
-    def _refresh_tensors(self) -> None:
-        self.tensors = _module_unique_tensors(self.model)
-        self.total_size = sum(
-            tensor.nelement() * tensor.element_size()
-            for tensor in self.tensors
-            if tensor.device.type != "meta"
-        )
-        self.total_pages = (
-            max(1, math.ceil(self.total_size / self.page_size))
-            if self.total_size > 0
-            else 0
-        )
-
-    def loaded_size(self) -> int:
-        self._refresh_tensors()
-        return sum(
-            tensor.nelement() * tensor.element_size()
-            for tensor in self.tensors
-            if tensor.device.type != "meta"
-            and _same_device(tensor.device, self.device)
-        )
-
-    def get_residency(self) -> list[int]:
-        self._refresh_tensors()
-        if self.total_size <= 0:
-            return []
-        residency = [0 for _ in range(self.total_pages)]
-        cursor = 0
-        for tensor in self.tensors:
-            if tensor.device.type == "meta":
-                continue
-            size = tensor.nelement() * tensor.element_size()
-            if size <= 0:
-                continue
-            if _same_device(tensor.device, self.device):
-                first = cursor // self.page_size
-                last = min(
-                    self.total_pages - 1,
-                    (cursor + size - 1) // self.page_size,
-                )
-                for page in range(first, last + 1):
-                    residency[page] |= 1
-            cursor += size
-        return residency
-
-    def get_watermark(self) -> int:
-        self.watermark = max(self.watermark, self.loaded_size())
-        return self.watermark
-
-    def prioritize(self) -> None:
-        self.watermark = self.loaded_size()
-
-
 try:
     import comfy.model_patcher as _model_patcher
-
-    class Zonos2Patcher(_model_patcher.ModelPatcher):
-        def __init__(
-            self,
-            model,
-            load_device,
-            offload_device,
-            size=0,
-            weight_inplace_update=False,
-        ):
-            super().__init__(
-                model,
-                load_device,
-                offload_device,
-                size,
-                weight_inplace_update,
-            )
-            self._zonos2_hard_detach = False
-            self._ensure_dynamic_state(load_device)
-
-        def is_dynamic(self):
-            return True
-
-        def _ensure_dynamic_state(self, device):
-            device = torch.device(device)
-            if not hasattr(self.model, "dynamic_vbars"):
-                self.model.dynamic_vbars = {}
-            if not hasattr(self.model, "dynamic_pins"):
-                self.model.dynamic_pins = {}
-            if device not in self.model.dynamic_pins:
-                try:
-                    import comfy_aimdo.host_buffer
-
-                    empty_hostbuf = comfy_aimdo.host_buffer.HostBuffer(0, 0, 0)
-                except Exception:
-                    empty_hostbuf = None
-                self.model.dynamic_pins[device] = {
-                    "weights": (empty_hostbuf, [], [-1], [0], [0], {}),
-                    "patches": (empty_hostbuf, [], [-1], [0], [0], {}),
-                    "hostbufs_initialized": False,
-                    "failed": False,
-                    "active": False,
-                }
-
-        def _vbar_get(self):
-            vbars = getattr(self.model, "dynamic_vbars", {})
-            return next(iter(vbars.values())) if vbars else None
-
-        def loaded_size(self):
-            vbar = self._vbar_get()
-            if vbar is not None:
-                return vbar.loaded_size()
-            return getattr(self.model, "model_loaded_weight_memory", 0)
-
-        def partially_load(
-            self,
-            device_to,
-            extra_memory=0,
-            force_patch_weights=False,
-        ):
-            self._ensure_dynamic_state(device_to)
-            before = self.loaded_size()
-            self.model.to(device_to)
-            self.model.model_loaded_weight_memory = self.model_size()
-            return max(0, self.loaded_size() - before)
-
-        def partially_unload(
-            self,
-            device_to,
-            memory_to_free=0,
-            force_patch_weights=False,
-        ):
-            before = self.loaded_size()
-            self.detach()
-            return before
-
-        def detach(self, unpatch_all=True):
-            hard_detach = bool(self._zonos2_hard_detach)
-            try:
-                if hard_detach and hasattr(self.model, "to_empty"):
-                    self.model.to_empty(device=torch.device("meta"))
-                else:
-                    self.model.to(self.offload_device)
-                self.model.model_loaded_weight_memory = 0
-                if hard_detach:
-                    if hasattr(self.model, "dynamic_vbars"):
-                        self.model.dynamic_vbars.clear()
-                    if hasattr(self.model, "dynamic_pins"):
-                        self.model.dynamic_pins.clear()
-                else:
-                    self._ensure_dynamic_state(self.load_device)
-                    self.model.dynamic_vbars = {
-                        self.load_device: Zonos2VBar(
-                            self.model,
-                            self.load_device,
-                        )
-                    }
-            except Exception:
-                pass
-            finally:
-                self._zonos2_hard_detach = False
-            empty_cache = globals().get("_empty_accelerator_cache")
-            if callable(empty_cache):
-                empty_cache()
-            return self.model
-
-        def current_loaded_device(self):
-            try:
-                return next(self.model.parameters()).device
-            except StopIteration:
-                return self.offload_device
-
-        def loaded_ram_size(self):
-            return 0
-
-        def pinned_memory_size(self):
-            return 0
-
-        def unregister_inactive_pins(
-            self,
-            ram_to_unload,
-            subsets=["weights", "patches"],
-        ):
-            return 0
-
-        def partially_unload_ram(
-            self,
-            ram_to_unload,
-            subsets=["weights", "patches"],
-        ):
-            return 0
-
-    del _model_patcher
+    Zonos2Patcher = _model_patcher.CoreModelPatcher
 except Exception:
     Zonos2Patcher = None
 
@@ -474,29 +289,16 @@ def _register_with_comfy(patcher: Any) -> None:
 
         if patcher.load_device.type == "cpu":
             return
-        raw = patcher.model
-        patcher._ensure_dynamic_state(patcher.load_device)
-        raw.model_loaded_weight_memory = patcher.loaded_size()
-        raw.dynamic_vbars = {
-            patcher.load_device: Zonos2VBar(raw, patcher.load_device)
-        }
-        if any(loaded.model is patcher for loaded in mm.current_loaded_models):
-            return
-        loaded = mm.LoadedModel(patcher)
-        loaded.real_model = weakref.ref(raw)
-        loaded.model_finalizer = weakref.finalize(raw, mm.cleanup_models)
-        loaded.model_finalizer.atexit = False
-        loaded.currently_used = True
-        mm.current_loaded_models.insert(0, loaded)
+        mm.load_models_gpu([patcher])
         logger.info(
-            "Registered %s with ComfyUI/AIMDO memory tracking.",
-            raw.__class__.__name__,
+            "Loaded %s through ComfyUI%s memory management.",
+            patcher.model.__class__.__name__,
+            "/AIMDO" if patcher.is_dynamic() else "",
         )
     except Exception as exc:
-        logger.warning(
-            "Could not register ZONOS2 with ComfyUI/AIMDO: %s",
-            exc,
-        )
+        raise RuntimeError(
+            "Could not load ZONOS2 through ComfyUI memory management."
+        ) from exc
 
 
 def _unregister_from_comfy(patcher: Any) -> None:
@@ -530,16 +332,27 @@ def _unregister_from_comfy(patcher: Any) -> None:
 def register_runtime_module(
     module: torch.nn.Module,
     device: torch.device,
+    dynamic: bool | None = None,
 ) -> Any:
     if Zonos2Patcher is None or torch.device(device).type == "cpu":
         module.to(device)
         return None
-    patcher = Zonos2Patcher(
+    import comfy.model_patcher as model_patcher
+
+    use_dynamic = dynamic_vram_active(device) and dynamic is not False
+    patcher_class = (
+        model_patcher.CoreModelPatcher
+        if use_dynamic
+        else model_patcher.ModelPatcher
+    )
+    patcher = patcher_class(
         module,
         load_device=torch.device(device),
         offload_device=torch.device("cpu"),
     )
-    module.model_loaded_weight_memory = patcher.model_size()
+    module.model_loaded_weight_memory = 0
+    if not patcher.is_dynamic() and hasattr(module, "device"):
+        module.device = torch.device(device)
     _register_with_comfy(patcher)
     return patcher
 
@@ -547,7 +360,6 @@ def register_runtime_module(
 def resume_runtime_module(patcher: Any, device: torch.device) -> None:
     if patcher is None:
         return
-    patcher.partially_load(torch.device(device))
     _register_with_comfy(patcher)
 
 
@@ -556,7 +368,6 @@ def unload_runtime_module(patcher: Any, hard: bool = True) -> None:
         return
     _unregister_from_comfy(patcher)
     try:
-        patcher._zonos2_hard_detach = bool(hard)
         patcher.detach()
     except Exception:
         pass
@@ -570,8 +381,13 @@ def resume_bundle_to_device(bundle: Zonos2Bundle) -> None:
 def add_bundle_module(
     bundle: Zonos2Bundle,
     module: torch.nn.Module,
+    dynamic: bool | None = None,
 ) -> Any:
-    patcher = register_runtime_module(module, bundle.device)
+    patcher = register_runtime_module(
+        module,
+        bundle.device,
+        dynamic=dynamic,
+    )
     if patcher is not None:
         bundle.patchers.append(patcher)
     return patcher
@@ -670,22 +486,42 @@ def load_zonos2_bundle(
             f"unexpected={sorted(unexpected)[:10]}"
         )
     logger.info(
-        "Loading %d ZONOS2 tensors from %s on %s as %s with %s.",
+        "Loading %d ZONOS2 tensors from %s as %s, then staging for %s with %s.",
         count,
         checkpoint_path,
-        device,
         torch_dtype,
+        device,
         runtime_attention,
     )
+    use_dynamic_vram = should_use_dynamic_vram(model, device, torch_dtype)
+    source_dtype = inspect_checkpoint_dtype(checkpoint_path)
+    weight_device = torch.device("cpu") if device.type != "cpu" else device
     load_native_weights(
         model,
         checkpoint_path,
-        device,
-        torch_dtype,
+        weight_device,
+        source_dtype,
         progress_callback=progress_callback,
     )
+    set_runtime_dtype(model, torch_dtype)
+    if use_dynamic_vram:
+        logger.info(
+            "ZONOS2 is using file-backed %s weights with on-demand %s "
+            "AIMDO residency.",
+            source_dtype,
+            torch_dtype,
+        )
+    elif dynamic_vram_active(device):
+        logger.info(
+            "ZONOS2 fits in total VRAM with a 3 GiB runtime reserve; using "
+            "ComfyUI's static GPU path to avoid retained CPU model backing."
+        )
     patchers: list[Any] = []
-    model_patcher = register_runtime_module(model, device)
+    model_patcher = register_runtime_module(
+        model,
+        device,
+        dynamic=use_dynamic_vram,
+    )
     if model_patcher is not None:
         patchers.append(model_patcher)
 

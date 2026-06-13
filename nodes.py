@@ -323,10 +323,17 @@ def _sampling_options(
     )
 
 
-def _progress_callback(total: int):
-    pbar = ProgressBar(total) if ProgressBar is not None else None
+def _progress_callback(total: int | None = None):
+    pbar = (
+        ProgressBar(total)
+        if ProgressBar is not None and total is not None
+        else None
+    )
 
     def update(current: int, reported_total: int) -> None:
+        nonlocal pbar
+        if pbar is None and ProgressBar is not None:
+            pbar = ProgressBar(reported_total)
         if pbar is not None:
             pbar.update_absolute(current, reported_total)
 
@@ -386,7 +393,7 @@ class Zonos2ModelLoader:
         attention: str,
         download_if_missing: bool,
     ):
-        update = _progress_callback(507)
+        update = _progress_callback()
         bundle = load_zonos2_bundle(
             model_choice=model,
             dtype_name=dtype,

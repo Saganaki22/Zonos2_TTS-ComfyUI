@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -13,6 +12,35 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from safetensors import safe_open
+
+try:
+    from comfy.ops import (
+        cast_bias_weight,
+        uncast_bias_weight,
+    )
+except ImportError:
+    def cast_bias_weight(module, input=None, **kwargs):
+        return module.weight, module.bias, (None, None, None)
+
+    def uncast_bias_weight(module, weight, bias, offload_stream):
+        return None
+
+
+def _linear(
+    in_features: int,
+    out_features: int,
+    bias: bool = True,
+) -> nn.Module:
+    return nn.Linear(
+        in_features,
+        out_features,
+        bias=bias,
+    )
+
+
+def _embedding(num_embeddings: int, embedding_dim: int) -> nn.Module:
+    return nn.Embedding(num_embeddings, embedding_dim)
+
 
 try:
     from tqdm import tqdm
@@ -160,14 +188,10 @@ def read_config(path: Path) -> Zonos2Config:
     return Zonos2Config.from_dict(raw)
 
 
-class RMSNorm(nn.Module):
+class RMSNorm(nn.RMSNorm):
     def __init__(self, size: int, eps: float):
-        super().__init__()
-        self.weight = nn.Parameter(torch.empty(size), requires_grad=False)
-        self.eps = float(eps)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.rms_norm(x, (x.shape[-1],), self.weight, self.eps)
+        super().__init__(size, eps=float(eps))
+        self.weight.requires_grad_(False)
 
 
 class TensorLinear(nn.Module):
@@ -189,18 +213,28 @@ class MultiEmbedding(nn.Module):
         super().__init__()
         self.embedders = nn.ModuleList(
             [
-                nn.Embedding(config.codebook_size + 2, config.dim)
+                _embedding(config.codebook_size + 2, config.dim)
                 for _ in range(config.n_codebooks)
             ]
-            + [nn.Embedding(config.text_vocab + 1, config.dim)]
+            + [_embedding(config.text_vocab + 1, config.dim)]
         )
-        for embedding in self.embedders:
-            embedding.weight.requires_grad_(False)
+        self.output_dtype: torch.dtype | None = None
 
     def forward(self, codes: torch.Tensor) -> torch.Tensor:
-        result = self.embedders[0](codes[..., 0].long())
+        def embed(module: nn.Module, values: torch.Tensor) -> torch.Tensor:
+            if self.output_dtype is None:
+                return module(values)
+            try:
+                return module(values, out_dtype=self.output_dtype)
+            except TypeError:
+                return module(values).to(dtype=self.output_dtype)
+
+        result = embed(self.embedders[0], codes[..., 0].long())
         for index in range(1, codes.shape[-1]):
-            result = result + self.embedders[index](codes[..., index].long())
+            result = result + embed(
+                self.embedders[index],
+                codes[..., index].long(),
+            )
         return result
 
 
@@ -241,20 +275,26 @@ class Attention(nn.Module):
         self.num_heads = config.n_heads
         self.num_kv_heads = config.n_kv_heads
         self.head_dim = config.head_dim
-        self.wq = nn.Linear(config.dim, config.n_heads * config.head_dim, bias=False)
+        self.wq = _linear(
+            config.dim,
+            config.n_heads * config.head_dim,
+            bias=False,
+        )
         self.wkv = TensorLinear(
             2,
             config.n_kv_heads * config.head_dim,
             config.dim,
         )
-        self.wo = nn.Linear(config.n_heads * config.head_dim, config.dim, bias=False)
+        self.wo = _linear(
+            config.n_heads * config.head_dim,
+            config.dim,
+            bias=False,
+        )
         self.temp = nn.Parameter(
             torch.empty(1, config.n_heads, 1),
             requires_grad=False,
         )
-        self.gater = nn.Linear(config.dim, config.n_heads, bias=False)
-        for module in (self.wq, self.wo, self.gater):
-            module.weight.requires_grad_(False)
+        self.gater = _linear(config.dim, config.n_heads, bias=False)
 
         inv_freq = 1.0 / (
             config.rope_theta
@@ -393,8 +433,11 @@ class DenseFeedForward(nn.Module):
     def __init__(self, config: Zonos2Config):
         super().__init__()
         self.w_in = TensorLinear(2, config.intermediate_size, config.dim)
-        self.w_out = nn.Linear(config.intermediate_size, config.dim, bias=False)
-        self.w_out.weight.requires_grad_(False)
+        self.w_out = _linear(
+            config.intermediate_size,
+            config.dim,
+            bias=False,
+        )
         self.intermediate_size = config.intermediate_size
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -404,26 +447,76 @@ class DenseFeedForward(nn.Module):
         return self.w_out(up * F.silu(gate))
 
 
+class SonicExpert(nn.Module):
+    comfy_cast_weights = True
+    weight_function = []
+    bias_function = []
+
+    def __init__(self, config: Zonos2Config):
+        super().__init__()
+        self.w13_shape = (
+            config.intermediate_size * 2,
+            config.dim,
+        )
+        self.w2_shape = (
+            config.dim,
+            config.intermediate_size,
+        )
+        self.weight = nn.Parameter(
+            torch.empty(self.w13_shape),
+            requires_grad=False,
+        )
+        self.bias = nn.Parameter(
+            torch.empty(self.w2_shape),
+            requires_grad=False,
+        )
+        self.intermediate_size = config.intermediate_size
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if (
+            not hasattr(self, "_v")
+            and self.weight.device == x.device
+            and self.bias.device == x.device
+            and not self.weight_function
+            and not self.bias_function
+        ):
+            fused = F.linear(x, self.weight)
+            gate = fused[..., 0::2]
+            up = fused[..., 1::2]
+            return F.linear(F.silu(gate) * up, self.bias)
+
+        weight, bias, offload_stream = cast_bias_weight(
+            self,
+            x,
+            offloadable=True,
+        )
+        try:
+            fused = F.linear(x, weight)
+            gate = fused[..., 0::2]
+            up = fused[..., 1::2]
+            return F.linear(F.silu(gate) * up, bias)
+        finally:
+            uncast_bias_weight(self, weight, bias, offload_stream)
+
+
 class SonicExperts(nn.Module):
     def __init__(self, config: Zonos2Config):
         super().__init__()
-        self.w13 = nn.Parameter(
-            torch.empty(
-                config.moe_n_experts,
-                config.intermediate_size * 2,
-                config.dim,
-            ),
-            requires_grad=False,
-        )
-        self.w2 = nn.Parameter(
-            torch.empty(
-                config.moe_n_experts,
-                config.dim,
-                config.intermediate_size,
-            ),
-            requires_grad=False,
+        self.experts = nn.ModuleList(
+            SonicExpert(config)
+            for _ in range(config.moe_n_experts)
         )
         self.num_experts = config.moe_n_experts
+        self.packed_w13_shape = (
+            config.moe_n_experts,
+            config.intermediate_size * 2,
+            config.dim,
+        )
+        self.packed_w2_shape = (
+            config.moe_n_experts,
+            config.dim,
+            config.intermediate_size,
+        )
 
     def _forward_single_token(
         self,
@@ -438,13 +531,7 @@ class SonicExperts(nn.Module):
             key=lambda item: item[1],
         )
         for slot, expert_id in ordered_slots:
-            fused = self.w13[expert_id]
-            gate = F.linear(x, fused[0::2])
-            up = F.linear(x, fused[1::2])
-            expert_output = F.linear(
-                F.silu(gate) * up,
-                self.w2[expert_id],
-            )
+            expert_output = self.experts[expert_id](x)
             weight = topk_weights[0, slot].to(dtype=expert_output.dtype)
             output.add_(expert_output * weight)
         return output
@@ -470,10 +557,7 @@ class SonicExperts(nn.Module):
                 continue
             token_ids = torch.div(assignment, top_k, rounding_mode="floor")
             expert_input = x.index_select(0, token_ids)
-            fused = self.w13[expert_id]
-            gate = F.linear(expert_input, fused[0::2])
-            up = F.linear(expert_input, fused[1::2])
-            expert_output = F.linear(F.silu(gate) * up, self.w2[expert_id])
+            expert_output = self.experts[expert_id](expert_input)
             weights = flat_weights.index_select(0, assignment).to(
                 dtype=expert_output.dtype
             )
@@ -494,13 +578,29 @@ class SonicExperts(nn.Module):
 class Router(nn.Module):
     def __init__(self, config: Zonos2Config, layer_id: int):
         super().__init__()
-        self.down_proj = nn.Linear(config.dim, config.moe_router_dim, bias=True)
+        self.down_proj = _linear(
+            config.dim,
+            config.moe_router_dim,
+            bias=True,
+        )
         self.router_mlp = nn.Sequential(
-            nn.Linear(config.moe_router_dim, config.moe_router_dim, bias=True),
+            _linear(
+                config.moe_router_dim,
+                config.moe_router_dim,
+                bias=True,
+            ),
             nn.GELU(),
-            nn.Linear(config.moe_router_dim, config.moe_router_dim, bias=True),
+            _linear(
+                config.moe_router_dim,
+                config.moe_router_dim,
+                bias=True,
+            ),
             nn.GELU(),
-            nn.Linear(config.moe_router_dim, config.moe_n_experts, bias=False),
+            _linear(
+                config.moe_router_dim,
+                config.moe_n_experts,
+                bias=False,
+            ),
         )
         self.rmsnorm_eda = RMSNorm(config.moe_router_dim, config.norm_eps)
         self.use_eda = layer_id != config.moe_start_from_layer
@@ -514,10 +614,6 @@ class Router(nn.Module):
             requires_grad=False,
         )
         self.top_k = config.top_k_for_layer(layer_id)
-        for parameter in self.down_proj.parameters():
-            parameter.requires_grad_(False)
-        for parameter in self.router_mlp.parameters():
-            parameter.requires_grad_(False)
 
     def forward(
         self,
@@ -608,9 +704,10 @@ class Zonos2Model(nn.Module):
     def __init__(self, config: Zonos2Config):
         super().__init__()
         self.config = config
+        self.runtime_dtype: torch.dtype | None = None
         self.multi_embedder = MultiEmbedding(config)
         if config.speaker_enabled and config.speaker_lda_dim is not None:
-            self.speaker_lda_projection = nn.Linear(
+            self.speaker_lda_projection = _linear(
                 config.speaker_embedding_dim,
                 config.speaker_lda_dim,
                 bias=True,
@@ -620,7 +717,7 @@ class Zonos2Model(nn.Module):
             self.speaker_lda_projection = None
             speaker_input = config.speaker_embedding_dim
         self.speaker_projection = (
-            nn.Linear(speaker_input, config.dim, bias=True)
+            _linear(speaker_input, config.dim, bias=True)
             if config.speaker_enabled
             else None
         )
@@ -628,18 +725,11 @@ class Zonos2Model(nn.Module):
             [TransformerBlock(config, index) for index in range(config.n_layers)]
         )
         self.out_norm = RMSNorm(config.dim, config.norm_eps)
-        self.multi_output = nn.Linear(
+        self.multi_output = _linear(
             config.dim,
             config.n_codebooks * (config.codebook_size + 2),
             bias=False,
         )
-        if self.speaker_lda_projection is not None:
-            for parameter in self.speaker_lda_projection.parameters():
-                parameter.requires_grad_(False)
-        if self.speaker_projection is not None:
-            for parameter in self.speaker_projection.parameters():
-                parameter.requires_grad_(False)
-        self.multi_output.weight.requires_grad_(False)
 
     def materialize_runtime_buffers(self, device: torch.device) -> None:
         for layer in self.layers:
@@ -670,14 +760,15 @@ class Zonos2Model(nn.Module):
 
     def _speaker_projection(self, embedding: torch.Tensor) -> torch.Tensor:
         value = embedding
+        runtime_dtype = self.runtime_dtype or embedding.dtype
         if self.speaker_lda_projection is not None:
             value = self.speaker_lda_projection(
-                value.to(dtype=self.speaker_lda_projection.weight.dtype)
+                value.to(dtype=runtime_dtype)
             )
         if self.speaker_projection is None:
             raise RuntimeError("This ZONOS2 model has no speaker projection.")
         return self.speaker_projection(
-            value.to(dtype=self.speaker_projection.weight.dtype)
+            value.to(dtype=runtime_dtype)
         )
 
     def forward(
@@ -728,6 +819,48 @@ def build_native_model(config: Zonos2Config) -> Zonos2Model:
     return model
 
 
+def set_runtime_dtype(model: Zonos2Model, dtype: torch.dtype) -> None:
+    model.runtime_dtype = dtype
+    model.multi_embedder.output_dtype = dtype
+    for module in model.modules():
+        for name, value in module.named_parameters(recurse=False):
+            if value.is_floating_point():
+                setattr(module, f"{name}_comfy_model_dtype", dtype)
+        for name, value in module.named_buffers(recurse=False):
+            if value.is_floating_point():
+                setattr(module, f"{name}_comfy_model_dtype", dtype)
+
+
+def _sonic_expert_modules(
+    model: nn.Module,
+) -> dict[str, SonicExperts]:
+    return {
+        name: module
+        for name, module in model.named_modules()
+        if isinstance(module, SonicExperts)
+    }
+
+
+def checkpoint_layout(model: Zonos2Model) -> dict[str, tuple[int, ...]]:
+    layout = {
+        name: tuple(value.shape)
+        for name, value in model.state_dict().items()
+    }
+    for prefix, module in _sonic_expert_modules(model).items():
+        internal_prefix = f"{prefix}.experts."
+        for name in tuple(layout):
+            if name.startswith(internal_prefix):
+                del layout[name]
+        layout[f"{prefix}.w13"] = module.packed_w13_shape
+        layout[f"{prefix}.w2"] = module.packed_w2_shape
+
+    for name, module in model.named_modules():
+        checkpoint_shape = getattr(module, "checkpoint_weight_shape", None)
+        if checkpoint_shape is not None:
+            layout[f"{name}.weight"] = tuple(checkpoint_shape)
+    return layout
+
+
 def _set_parameter(
     model: nn.Module,
     name: str,
@@ -739,10 +872,21 @@ def _set_parameter(
     parent = model.get_submodule(parent_name) if parent_name else model
     current = getattr(parent, leaf)
     if current.shape != tensor.shape:
-        raise ValueError(
-            f"Shape mismatch for {name}: expected {tuple(current.shape)}, "
-            f"got {tuple(tensor.shape)}"
+        checkpoint_shape = getattr(
+            parent,
+            f"checkpoint_{leaf}_shape",
+            None,
         )
+        if (
+            checkpoint_shape is None
+            or tuple(tensor.shape) != tuple(checkpoint_shape)
+            or tensor.numel() != current.numel()
+        ):
+            raise ValueError(
+                f"Shape mismatch for {name}: expected {tuple(current.shape)}, "
+                f"got {tuple(tensor.shape)}"
+            )
+        tensor = tensor.reshape(current.shape)
     value = tensor
     if value.is_floating_point():
         value = value.to(dtype=dtype)
@@ -754,7 +898,7 @@ def validate_checkpoint_layout(
     model: Zonos2Model,
     checkpoint_path: Path,
 ) -> tuple[int, set[str], set[str]]:
-    expected = model.state_dict()
+    expected = checkpoint_layout(model)
     with safe_open(str(checkpoint_path), framework="pt", device="cpu") as handle:
         actual_names = set(handle.keys())
         expected_names = set(expected)
@@ -762,10 +906,10 @@ def validate_checkpoint_layout(
         unexpected = actual_names - expected_names
         for name in sorted(expected_names & actual_names):
             shape = tuple(handle.get_slice(name).get_shape())
-            if shape != tuple(expected[name].shape):
+            if shape != expected[name]:
                 raise ValueError(
                     f"Shape mismatch for {name}: checkpoint {shape}, "
-                    f"model {tuple(expected[name].shape)}"
+                    f"model {expected[name]}"
                 )
     return len(expected), missing, unexpected
 
@@ -777,8 +921,14 @@ def load_native_weights(
     dtype: torch.dtype,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> None:
-    expected = model.state_dict()
+    expected = checkpoint_layout(model)
     expected_names = set(expected)
+    sonic_modules = _sonic_expert_modules(model)
+    packed_expert_names = {
+        f"{prefix}.{suffix}": (prefix, suffix)
+        for prefix in sonic_modules
+        for suffix in ("w13", "w2")
+    }
     with safe_open(str(checkpoint_path), framework="pt", device="cpu") as handle:
         source_names = set(handle.keys())
         missing = expected_names - source_names
@@ -804,7 +954,28 @@ def load_native_weights(
         try:
             for index, name in enumerate(names, start=1):
                 tensor = handle.get_tensor(name)
-                _set_parameter(model, name, tensor, device, dtype)
+                packed = packed_expert_names.get(name)
+                if packed is None:
+                    _set_parameter(model, name, tensor, device, dtype)
+                else:
+                    prefix, projection = packed
+                    module = sonic_modules[prefix]
+                    for expert_index in range(module.num_experts):
+                        expert = module.experts[expert_index]
+                        source = tensor[expert_index].to(
+                            device=device,
+                            dtype=dtype,
+                        )
+                        if projection == "w13":
+                            expert.weight = nn.Parameter(
+                                source,
+                                requires_grad=False,
+                            )
+                        else:
+                            expert.bias = nn.Parameter(
+                                source,
+                                requires_grad=False,
+                            )
                 if terminal_progress is not None:
                     terminal_progress.update(1)
                 if progress_callback is not None:
@@ -1107,8 +1278,10 @@ def generate_audio_codes(
     speaker_position: int | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[torch.Tensor, int | None]:
-    device = next(model.parameters()).device
-    dtype = next(model.parameters()).dtype
+    device = torch.device(
+        getattr(model, "device", next(model.parameters()).device)
+    )
+    dtype = model.runtime_dtype or next(model.parameters()).dtype
     prompt = prompt.to(device=device)
     total_length = prompt.shape[1] + int(options.max_new_tokens)
     if total_length > model.config.max_seqlen:

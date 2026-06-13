@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
@@ -118,6 +117,7 @@ class Zonos2SpeakerEncoder(nn.Module):
     def __init__(self, model: nn.Module):
         super().__init__()
         self.model = model.eval()
+        self._runtime_device = next(self.model.parameters()).device
         self.mel_transform = torchaudio.transforms.MelSpectrogram(
             sample_rate=self.target_sample_rate,
             n_fft=1024,
@@ -131,18 +131,25 @@ class Zonos2SpeakerEncoder(nn.Module):
             norm="slaney",
             mel_scale="slaney",
         )
+        self._resamplers = nn.ModuleDict()
         self.requires_grad_(False)
 
     @property
     def device(self) -> torch.device:
-        return next(self.model.parameters()).device
+        return torch.device(self._runtime_device)
 
-    @lru_cache(maxsize=8)
+    @device.setter
+    def device(self, value: torch.device | str) -> None:
+        self._runtime_device = torch.device(value)
+
     def _resampler(self, source_sample_rate: int):
-        return torchaudio.transforms.Resample(
-            int(source_sample_rate),
-            self.target_sample_rate,
-        ).to(self.device)
+        key = str(int(source_sample_rate))
+        if key not in self._resamplers:
+            self._resamplers[key] = torchaudio.transforms.Resample(
+                int(source_sample_rate),
+                self.target_sample_rate,
+            ).to(self.device)
+        return self._resamplers[key]
 
     def _prepare_audio(
         self,
@@ -230,8 +237,8 @@ def ensure_codec(bundle: Zonos2Bundle) -> Zonos2DAC:
         str(local_dir),
         local_files_only=True,
     )
-    codec = Zonos2DAC(model).to(bundle.device)
-    add_bundle_module(bundle, codec)
+    codec = Zonos2DAC(model)
+    add_bundle_module(bundle, codec, dynamic=False)
     bundle.codec = codec
     logger.info("Loaded DAC 44.1 kHz decoder from %s.", local_dir)
     return codec
@@ -259,8 +266,8 @@ def ensure_speaker_encoder(bundle: Zonos2Bundle) -> Zonos2SpeakerEncoder:
         trust_remote_code=True,
         local_files_only=True,
     )
-    encoder = Zonos2SpeakerEncoder(model).to(bundle.device)
-    add_bundle_module(bundle, encoder)
+    encoder = Zonos2SpeakerEncoder(model)
+    add_bundle_module(bundle, encoder, dynamic=False)
     bundle.speaker_encoder = encoder
     logger.info("Loaded ZONOS2 speaker encoder from %s.", local_dir)
     return encoder

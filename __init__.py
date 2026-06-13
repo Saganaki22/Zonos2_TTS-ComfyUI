@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __citation__ = """@misc{zyphra2025zonos,
   title     = {Zonos V2 Technical Report},
   author    = {Gabriel Clark, Sofian Mejjoute, Mohamed Osman, George Close, Beren Millidge},
