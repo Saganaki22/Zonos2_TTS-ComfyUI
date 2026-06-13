@@ -2,7 +2,7 @@
 
 ComfyUI custom nodes nodes for [Zyphra/ZONOS2](https://github.com/Zyphra/ZONOS2), with text-to-speech, audio-only voice cloning, SDPA and FlashAttention inference, native progress reporting, and ComfyUI/AIMDO memory management.
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
+[![Version](https://img.shields.io/badge/version-0.1.3-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-2d7dd2)](https://github.com/comfyanonymous/ComfyUI)
 [![Upstream](https://img.shields.io/badge/Upstream-Zyphra%2FZONOS2-111111)](https://github.com/Zyphra/ZONOS2)
 [![Official Model](https://img.shields.io/badge/Hugging_Face-Zyphra%2FZONOS2-ffd21e)](https://huggingface.co/Zyphra/ZONOS2)
@@ -136,13 +136,13 @@ Accepts `zonos2_model` and UTF-8 text, then returns mono ComfyUI `AUDIO` at 44.1
 
 ### ZONOS2 Voice Clone
 
-Accepts `zonos2_model`, UTF-8 text, and a required native ComfyUI `reference_audio` noodle. ZONOS2 extracts its official 2048-dimensional ECAPA-TDNN speaker embedding directly from the audio; reference text is not required.
+Accepts `zonos2_model`, UTF-8 text, and a required native ComfyUI `reference_audio` noodle. ZONOS2 extracts its official 2048-dimensional ECAPA-TDNN speaker embedding directly from the audio; reference text is not required. The model conditions on this fixed speaker embedding rather than the reference waveform or transcript, so voice identity can transfer more reliably than accent, cadence, emotion, and other utterance-level prosody.
 
 | Clone setting | Default | Description |
 |---|---:|---|
-| `reference_audio` | required | Use 5–30 seconds of clean, single-speaker speech. The node accepts at most 60 seconds and clips longer input with a CLI warning. |
-| `clean_speaker_background` | `true` | Enable for clean speech; disable when the recording has noticeable room noise or ambience. |
-| `accurate_mode` | `true` | Favors closer speaker matching. Disable for looser, potentially more expressive conditioning. |
+| `reference_audio` | required | Use 5–30 seconds of clear, single-speaker speech that demonstrates the desired accent. The node accepts at most 60 seconds and clips longer input with a CLI warning. |
+| `clean_speaker_background` | `false` | Matches the upstream default. Enable only for genuinely clean studio-like speech; leave disabled for ordinary recordings or audible room tone, noise, reverb, or ambience. |
+| `accurate_mode` | `true` | Requests stricter adherence to the speaker embedding. It may improve identity similarity, but it is not a dedicated accent or prosody control. Disable for looser, potentially more expressive conditioning. |
 
 ### Sampling controls
 
@@ -183,6 +183,8 @@ Every conditioning dropdown includes `default`, which leaves that feature uncond
 - The ComfyUI CLI reports the supplied duration and clipping action.
 - Very short references below 5 seconds also produce a recommendation warning.
 - Avoid music, overlapping speakers, heavy denoising artifacts, strong reverb, and long silence.
+- Include clear examples of the desired accent and, where practical, use reference speech in the same language as the generated text.
+- Leave `clean_speaker_background` disabled unless the recording is genuinely clean. This flag describes the recording condition; it is not a denoiser.
 
 The 60-second ceiling is a practical memory and latency guardrail in this integration, not a documented architectural limit of the upstream ZONOS2 model.
 
@@ -211,6 +213,7 @@ The ZONOS2 model, DAC decoder, and lazy speaker encoder are registered as real P
 - Reusing identical loader settings resumes the existing bundle.
 - Changing model, dtype, or attention unregisters the old bundle, moves its tensors to `meta`, clears references, runs garbage collection, and empties accelerator caches before loading the replacement.
 - Loading and generation use native ComfyUI progress bars plus CLI `tqdm`.
+- Single-token MoE decoding dispatches only the selected expert weights instead of scanning every expert, substantially reducing autoregressive generation overhead without changing generated tokens.
 
 Measured BF16 CUDA allocation with the main model and DAC loaded is approximately 14.7 GiB. Leave additional VRAM available for the KV cache, speaker encoder, ComfyUI, and other nodes.
 
@@ -233,7 +236,13 @@ Unload other large ComfyUI models, reduce `max_new_tokens`, use ComfyUI offloadi
 
 **Voice cloning sounds weak or inaccurate**
 
-Use 5–30 seconds of clean, single-speaker speech. Set `clean_speaker_background` to match the recording and leave `accurate_mode` enabled for closer identity matching.
+Use 5–30 seconds of clear, single-speaker speech with little silence. Set `clean_speaker_background` to match the actual recording instead of enabling it automatically, and leave `accurate_mode` enabled for stricter identity conditioning.
+
+**The voice matches, but the accent or cadence does not**
+
+This can be a model limitation rather than an integration fault. ZONOS2 receives one 2048-dimensional speaker embedding from the reference, not the reference waveform, audio tokens, or transcript. That embedding is designed primarily to represent speaker identity and can discard accent, rhythm, emotion, and other utterance-level variation. Use a reference that clearly demonstrates the target accent, preferably in the target language, and compare several fixed seeds. If sampling varies too much, trying `temperature` around `0.8–1.0` may make results more stable, but it cannot add accent information absent from the embedding.
+
+`accurate_mode` enables the upstream accurate-cloning token; it is not an accent-strength control. The integration currently uses ZONOS2's supported raw UTF-8 text path. Upstream NeMo text normalization can improve written-number, date, and currency pronunciation, but it does not supply reference accent information.
 
 **The reference is longer than 60 seconds**
 

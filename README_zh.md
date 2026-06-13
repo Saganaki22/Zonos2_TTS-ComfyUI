@@ -1,6 +1,6 @@
 # ZONOS2 TTS ComfyUI
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
+[![Version](https://img.shields.io/badge/version-0.1.3-blue)](https://github.com/Saganaki22/Zonos2_TTS-ComfyUI)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-2d7dd2)](https://github.com/comfyanonymous/ComfyUI)
 [![Upstream](https://img.shields.io/badge/Upstream-Zyphra%2FZONOS2-111111)](https://github.com/Zyphra/ZONOS2)
 [![Official Model](https://img.shields.io/badge/Hugging_Face-Zyphra%2FZONOS2-ffd21e)](https://huggingface.co/Zyphra/ZONOS2)
@@ -135,13 +135,13 @@ ComfyUI/models/zonos2/
 
 ### ZONOS2 Voice Clone
 
-接收 `zonos2_model`、UTF-8 文本和必需的 ComfyUI `reference_audio` 连线。ZONOS2 会直接从音频中提取官方的 2048 维 ECAPA-TDNN 说话人嵌入，因此不需要参考文本。
+接收 `zonos2_model`、UTF-8 文本和必需的 ComfyUI `reference_audio` 连线。ZONOS2 会直接从音频中提取官方的 2048 维 ECAPA-TDNN 说话人嵌入，因此不需要参考文本。模型使用固定的说话人嵌入进行条件控制，而不是直接使用参考波形或文本，所以声音身份通常比口音、节奏、情绪及其他句子级韵律更容易保留。
 
 | 克隆设置 | 默认值 | 说明 |
 |---|---:|---|
-| `reference_audio` | 必需 | 推荐使用 5–30 秒、单人且干净的语音。节点最多接受 60 秒，超出部分会被裁剪，并在 CLI 中显示警告。 |
-| `clean_speaker_background` | `true` | 干净语音请启用；存在明显房间噪声或环境声时请关闭。 |
-| `accurate_mode` | `true` | 更侧重说话人相似度；关闭后条件约束更宽松，可能更有表现力。 |
+| `reference_audio` | 必需 | 推荐使用 5–30 秒清晰的单人语音，并确保其中能明显体现目标口音。节点最多接受 60 秒，超出部分会被裁剪，并在 CLI 中显示警告。 |
+| `clean_speaker_background` | `false` | 与上游默认值一致。仅对真正干净的录音室语音启用；普通录音或存在房间底噪、噪声、混响及环境声时应保持关闭。 |
+| `accurate_mode` | `true` | 请求更严格地遵循说话人嵌入。它可能提高声音身份相似度，但不是专用的口音或韵律控制。关闭后条件约束更宽松，结果可能更有表现力。 |
 
 ### 采样控制
 
@@ -182,6 +182,8 @@ ComfyUI/models/zonos2/
 - ComfyUI CLI 会显示原始时长和具体裁剪操作。
 - 少于 5 秒的参考音频也会显示建议警告。
 - 请避免音乐、多人重叠、严重降噪伪影、强混响和长时间静音。
+- 参考音频应清楚体现目标口音；条件允许时，参考语音最好与生成文本使用相同语言。
+- 除非录音确实非常干净，否则请保持 `clean_speaker_background` 关闭。此选项用于描述录音条件，并不是降噪器。
 
 60 秒上限是本集成针对内存和延迟设置的实用保护措施，并非上游 ZONOS2 模型公开说明的架构硬限制。
 
@@ -210,6 +212,7 @@ ZONOS2 主模型、DAC 解码器和按需加载的说话人编码器都会作为
 - 使用完全相同的加载设置时会恢复现有模型包。
 - 更改模型、数据类型或注意力后端时，旧模型会取消注册，张量会移至 `meta`，随后清理引用、执行垃圾回收并清空加速器缓存。
 - 加载和生成均使用原生 ComfyUI 进度条及 CLI `tqdm`。
+- 单 token MoE 解码只调度实际选中的专家权重，不再逐个扫描全部专家，可在不改变生成 token 的前提下显著降低自回归生成开销。
 
 实测主 BF16 模型和 DAC 加载后的 CUDA 分配约为 14.7 GiB。还需为 KV 缓存、说话人编码器、ComfyUI 和其他节点预留额外显存。
 
@@ -232,7 +235,13 @@ ZONOS2 主模型、DAC 解码器和按需加载的说话人编码器都会作为
 
 **声音克隆相似度较低**
 
-使用 5–30 秒干净的单人语音，让 `clean_speaker_background` 与录音环境一致，并保持 `accurate_mode` 启用以获得更高相似度。
+使用 5–30 秒清晰且静音较少的单人语音。让 `clean_speaker_background` 与真实录音条件一致，而不是总是启用；保持 `accurate_mode` 开启可获得更严格的身份条件控制。
+
+**声音相似，但口音或节奏没有保留**
+
+这可能是模型限制，而不是集成错误。ZONOS2 从参考音频中只接收一个 2048 维说话人嵌入，而不会接收参考波形、音频 token 或参考文本。该嵌入主要用于表示说话人身份，因此可能丢失口音、节奏、情绪及其他句子级变化。请使用能清楚体现目标口音的参考音频，最好与目标文本使用相同语言，并比较多个固定种子。如果采样变化过大，可尝试将 `temperature` 调到约 `0.8–1.0` 以提高稳定性，但这无法补充嵌入中不存在的口音信息。
+
+`accurate_mode` 启用的是上游准确克隆 token，并不是口音强度控制。本集成目前使用 ZONOS2 支持的原始 UTF-8 文本路径。上游 NeMo 文本规范化可以改善数字、日期和货币等书写形式的读法，但不会提供参考口音信息。
 
 **参考音频超过 60 秒**
 

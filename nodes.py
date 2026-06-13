@@ -488,8 +488,10 @@ class Zonos2VoiceClone:
                     "tooltip": (
                         "Reference voice AUDIO noodle. "
                         f"{RECOMMENDED_REFERENCE_MIN_SECONDS:.0f}-"
-                        f"{RECOMMENDED_REFERENCE_MAX_SECONDS:.0f} seconds of clean, "
-                        "single-speaker speech is recommended. Audio longer than "
+                        f"{RECOMMENDED_REFERENCE_MAX_SECONDS:.0f} seconds of clear, "
+                        "single-speaker speech is recommended. Use a sample that clearly "
+                        "demonstrates the accent you want, with little silence, music, or "
+                        "reverb. Audio longer than "
                         f"{MAX_REFERENCE_SECONDS:.0f} seconds is clipped to the first "
                         f"{MAX_REFERENCE_SECONDS:.0f} seconds with a CLI warning."
                     ),
@@ -498,15 +500,15 @@ class Zonos2VoiceClone:
             "clean_speaker_background": (
                 "BOOLEAN",
                 {
-                    "default": True,
-                    "tooltip": "Tell ZONOS2 whether the reference voice was recorded with little background noise. Enable for clean studio-like speech; disable when the source contains noticeable room noise or ambience.",
+                    "default": False,
+                    "tooltip": "Official ZONOS2 clean/noisy conditioning flag. Leave disabled for ordinary recordings or any audible room tone, noise, reverb, or ambience. Enable only for genuinely clean studio-like speech.",
                 },
             ),
             "accurate_mode": (
                 "BOOLEAN",
                 {
                     "default": True,
-                    "tooltip": "Enable ZONOS2 accurate mode for closer speaker matching. Disable for a more expressive result that may follow the reference identity less strictly.",
+                    "tooltip": "Enable the official ZONOS2 accurate-cloning token for stricter speaker-embedding adherence. It can improve identity matching, but it does not guarantee transfer of accent, cadence, emotion, or other prosody. Disable for looser, potentially more expressive conditioning.",
                 },
             ),
         }

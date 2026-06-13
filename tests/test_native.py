@@ -1,9 +1,11 @@
+from dataclasses import replace
 from pathlib import Path
 
 import torch
 
 from zonos2_tts_comfyui_test.loader import inspect_checkpoint_dtype
 from zonos2_tts_comfyui_test.native import (
+    SonicExperts,
     build_native_model,
     build_prompt,
     read_config,
@@ -30,6 +32,48 @@ def test_conditioning_rows_follow_upstream_order():
     )
     assert speaker_position is None
     assert prompt[0, :4, -1].tolist() == [451, 469, 512, 2]
+
+
+def test_single_token_expert_fast_path_matches_grouped_top1():
+    config = replace(
+        read_config(ROOT / "assets" / "params.json"),
+        dim=8,
+        intermediate_size=12,
+        moe_n_experts=4,
+    )
+    experts = SonicExperts(config)
+    torch.manual_seed(7)
+    experts.w13.data.normal_(mean=0.0, std=0.01)
+    experts.w2.data.normal_(mean=0.0, std=0.01)
+    hidden = torch.randn(1, config.dim)
+    weights = torch.tensor([[0.625]])
+    ids = torch.tensor([[3]])
+
+    expected = experts._forward_grouped(hidden, weights, ids)
+    actual = experts(hidden, weights, ids)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_single_token_expert_fast_path_matches_grouped_top2():
+    config = replace(
+        read_config(ROOT / "assets" / "params.json"),
+        dim=8,
+        intermediate_size=12,
+        moe_n_experts=4,
+    )
+    experts = SonicExperts(config)
+    torch.manual_seed(11)
+    experts.w13.data.normal_(mean=0.0, std=0.01)
+    experts.w2.data.normal_(mean=0.0, std=0.01)
+    hidden = torch.randn(1, config.dim)
+    weights = torch.tensor([[0.55, 0.35]])
+    ids = torch.tensor([[3, 1]])
+
+    expected = experts._forward_grouped(hidden, weights, ids)
+    actual = experts(hidden, weights, ids)
+
+    torch.testing.assert_close(actual, expected)
 
 
 def test_local_checkpoint_dtype_when_available():

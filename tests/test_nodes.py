@@ -25,6 +25,12 @@ def test_clone_has_native_audio_input():
     assert "reference_text" not in required
 
 
+def test_clone_defaults_match_upstream_conditioning():
+    required = Zonos2VoiceClone.INPUT_TYPES()["required"]
+    assert required["clean_speaker_background"][1]["default"] is False
+    assert required["accurate_mode"][1]["default"] is True
+
+
 def test_both_generation_nodes_expose_all_quality_features():
     for node in (Zonos2VoiceGeneration, Zonos2VoiceClone):
         required = node.INPUT_TYPES()["required"]

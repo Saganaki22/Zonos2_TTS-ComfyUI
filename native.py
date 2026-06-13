@@ -425,7 +425,31 @@ class SonicExperts(nn.Module):
         )
         self.num_experts = config.moe_n_experts
 
-    def forward(
+    def _forward_single_token(
+        self,
+        x: torch.Tensor,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        selected = topk_ids[0].tolist()
+        output = torch.zeros_like(x)
+        ordered_slots = sorted(
+            enumerate(selected),
+            key=lambda item: item[1],
+        )
+        for slot, expert_id in ordered_slots:
+            fused = self.w13[expert_id]
+            gate = F.linear(x, fused[0::2])
+            up = F.linear(x, fused[1::2])
+            expert_output = F.linear(
+                F.silu(gate) * up,
+                self.w2[expert_id],
+            )
+            weight = topk_weights[0, slot].to(dtype=expert_output.dtype)
+            output.add_(expert_output * weight)
+        return output
+
+    def _forward_grouped(
         self,
         x: torch.Tensor,
         topk_weights: torch.Tensor,
@@ -455,6 +479,16 @@ class SonicExperts(nn.Module):
             )
             output.index_add_(0, token_ids, expert_output * weights.unsqueeze(-1))
         return output.view(tokens, hidden)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        if x.shape[0] == 1:
+            return self._forward_single_token(x, topk_weights, topk_ids)
+        return self._forward_grouped(x, topk_weights, topk_ids)
 
 
 class Router(nn.Module):
